@@ -1,0 +1,361 @@
+---
+title: "Stochastic Simulation Coursework project"
+author: "Jonathan Cheung CID:01063446"
+date: "05/11/2019"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+\newcommand{\e}{\mathrm{e}}
+### Generating from $f_X(x)$ using Rejection
+
+The general rejection sampling algorithm to simulate a random variable $X \sim f_X(x)$, requires specification of an envelope distribution $f_Y(y)$, whose range contains the range of $X$ and such that $M f_Y(y) \geq f_X(x), \, \forall x$, where $M = \sup_{x} \frac{f_X(x)}{g_Y(x)}$. Once, we have specified $g_Y(y)$ and $M$, the general rejection algorithm is given below.
+
+### General Rejection Algorithm:
+
+1. Generate $U=u\sim U(0,1)$.  \
+2. Generate $Y =y \sim g_Y(y)$. \
+3. If $u\leq \frac{f_X(y)}{M g_Y(y)}$, set $X=y \sim f_{X}(\cdot)$. \
+4. Otherwise GOTO 1. \ \
+
+
+The paramters that relate to my CID are a=1,b=3,c=2, and d=-0.5
+Thus, my function is
+\[
+f_X(x) \propto \begin{cases}
+\frac{1}{(x-1)(3-x)} e^{\frac{1}{2}(-\frac{1}{2}+log(\frac{x-1}{3-x}))}, \quad 1<x < 3 \\
+0, \quad \quad \quad \quad \quad \quad\quad \quad \quad \quad otherwise
+\end{cases}
+\]
+and we will use a $Cauchy(2.435,0.84)$ envelope,
+i.e. $g_Y(y) = \frac{1}{0.84\pi [1 + (\frac{x-2.435}{0.84})^2]} , \; y>0$.\
+
+The location parameter was chosen by approximately taking the x value that maximised the pdf function. The scale parameter was chosen by running the code below as a function that took as its input a range of 'scal' values and outputting the different acceptance probabilities. The scale that outputted the highest probability was used. Given more time, we could try choosing an even more efficient envelope by experimenting with the location parameter as well.
+
+To calculate the acceptance probability, we evaluated
+\[
+M = \sup_x \frac{f^*_X(y)}{g_Y(y)}
+\]
+This was found numerically using the max function, further down.
+
+### Simulation from $g_Y(\cdot)$:
+
+We have $Y \sim Cauchy(2.435,0.84)$, so $g_Y(y) = \frac{1}{[0.84\pi(1 + (\frac{y-2.435}{0.84})^2]}, \, 1<x<3$ and 
+\[
+G_Y(y) = \frac{1}{\pi}\arctan(\frac{x-2.435}{0.84}) + \frac{1}{2} \Rightarrow G_Y^{-1}(y) = 0.84\tan(\pi*(y - 0.5)) + 2.435.
+\]
+In order to simulate from $g_Y$ we use inversion.
+
+### Inversion Algorithm for $g_Y(\cdot)$:
+
+1. Simulate $U=u\sim U(0,1)$. \
+2. Discard $u \in U$ if $G_Y^{-1}(u)<1$ or $G_Y^{-1}(u)>3$ 
+3. Set $Y=y = 0.84\tan(\pi*(u - 0.5)) + 2.435 \sim g_Y(\cdot)$.\
+
+Discarding u values in step 2 is equivalent to using the truncated CDF. Using a truncated CDF would be marginally faster though. Discarding values avoids calculating the truncated cdf.
+
+The acceptance probability, $\theta$, of the algorithm is calculated by taking a ratio of the integral of f* and Mg. This is calculated as 'acceptp' in the code below.
+
+### Rejection Algorithm:
+
+1. Simulate $U=u \sim U(0,1)$. \
+2. Discard $u \in U$ if $G_Y^{-1}(u)<1$ or $G_Y^{-1}(u)>3$ 
+3. Simulate $Y = y = 0.84\tan(\pi*(u - 0.5)) + 2.435 \sim g_Y(\cdot)$. \
+4. If $u \leq \frac{f(y)}{Mg(y)}$
+, then $X=y \sim f_X(\cdot)$. \ 
+5. Otherwise GOTO 1.
+
+The following chunk of code will plot the given function and scaled envelope function.
+
+```{r global_options, warning=FALSE}
+
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+suppressMessages(library(tidyverse,verbose=FALSE,warn.conflicts=FALSE,quietly=TRUE))
+suppressMessages(library(forecast,verbose=FALSE,warn.conflicts =FALSE,quietly=TRUE))
+
+fstar <- function(x) (1/((x-1)*(3-x))) * exp(-1/2 * (-0.5 + log((x-1)/(3-x)))^2)#mypdf
+
+set.seed(2) #setting seed so that comments refer to exact results
+range1 <- seq(1.0001,2.9999,length.out=1000) #1000 points in (1,3)
+
+opt= optimise(fstar,range1,maximum= TRUE)
+
+loc=2.435
+scal = 0.84
+g <- function(x)   1/(pi*scal*(1 + ((x-loc)/scal)^2)) #0.84
+
+pcauchy2 <- function(x,l,s) (1/pi)*atan((x-l)/s) + 0.5 #write my own function for cauchy cdf
+
+int_g = pcauchy2(3,2.435,scal)-pcauchy2(1,2.435,scal) #eval integral using cdf
+
+
+int_fstar = integrate(fstar,1,3) #integrate pdf
+int_fstar = as.numeric(int_fstar[1]) #convert list item to double
+M = max(fstar(range1)/g(range1)) #find an M to scale g so that it is greater than f* #M=2.96483
+acceptp=int_fstar / (int_g*M) #acceptance probability
+
+x=seq(1,3,l=1000)
+fgx = data.frame(x=x, fx=fstar(x), gx=M*g(x))
+mylabs=list(expression(f[X](x)),expression(Mg[Y](x)))
+```
+```{r}
+p <- ggplot(fgx)
+p + geom_line(aes(x,fx,colour="fx"))+
+  geom_line(aes(x,gx,colour="fy"))+ 
+  labs(y="pdf", title=expression("Comparison of "~f[X](x)~"and "~Mg[X](x)))+
+  scale_colour_manual("", values=c("fx"="red","fy"="blue"), labels=mylabs)
+
+```
+The cauchy curve seems to be a good fit for this function. The theoretical acceptance probability 'acceptp' is 81.3%. The missing 18.7% seems to be from the tails. Perhaps, an alternative curve we could try would be some sort of parabola that meets the x axis. An advantage of this would be that its inverse CDF would be less expensive to calculate.
+
+The code below is a function 'rhn' that takes as its input an integer n, and outputs n random numbers from the given function and the empirical acceptance probabilities.
+
+```{r}
+rhn <- function(n){
+  # simulated values in x 
+  x <- vector()
+  # estimated acceptance probabilities in p
+  p <- vector()
+  len_x = 0
+
+  mult = 1/acceptp # 1/acceptance probability
+  while(len_x <= n){
+    n_to_gen = max((n-len_x)*mult,10) # determine number to generate - not less than 10
+    u1=runif(n_to_gen)
+    precheck <- u1 > pcauchy2(1,loc,scal) & u1<pcauchy2(3,loc,scal)
+    u1 <- u1[precheck]
+    y=scal*tan(pi*(u1 - 0.5)) + loc # generate cauchy(2.435,0.84) using inversion (truncated)
+    u2 = runif(length(u1))#n_to_gen)
+  
+    cond <- u2 <= fstar(y)/(M*g(y)*int_fstar) # accept X=y if u <= f(y)/Mg(y), divide by fstar to normalise
+    p <- c(p, sum(cond)/length(u1)) # keep track of estimated acceptance prob
+    x <- c(x, y[cond]) # concatenate accepted values
+    len_x <- length(x)
+  }
+  return(list(x=x[1:n], p=p))
+}
+
+```
+
+### Diagnostic Plots
+
+Now, the data that rhn has generated needs to be checked to see if it is independently distributed with the given function. We use a histogram to check that the the numbers within each bin are being generated at a frequency defined by the theoretical distribution function. The almost straight line result of the quantile plot reinforces that our rhn is generating data that follows the distribution function. The quantile plot does curve at the ends slightly. Perhaps this is due to the use of 1.000001 and 2.999999 instead of 1 and 3 to avoid some NaN errors.
+
+In addition, the auto-covariance plot shows no signs of significant correlations at any lag.  The lag scatter plots of $F_X(x_i)$ (the cdf evaluated at the data values) show a random scatter, which further supports that the data are generated independently from $f_X(\cdot)$ (because if $X \sim f_X(x)$ then $F_X(X) \sim U(0,1)$).
+
+
+
+
+```{r}
+library(ggplot2)
+library(pracma)
+
+n=5000
+x=rhn(n)
+x_rhn <- data.frame(x=x$x)
+# theoretical quantile function:
+#qhn <- function(p) loc +scal*tan(pi*(p - 0.5))#qnorm(p/2+0.5)
+# theoretical cdf:
+phn <- function(x) as.numeric(integrate(fstar,1,x)[1]) /int_fstar
+phn <- Vectorize(phn)
+#(1/pi)*atan((x-loc)/scal) +0.5  #2*(pnorm(x)-0.5)
+```
+```{r}
+# Histogram
+mylabs=list(expression(f[X](x)))
+cols = c("fy"="blue")
+x=x_rhn$x
+x_plot = cbind(x_rhn, fy = (1/((x-1)*(3-x))) * exp(-1/2 * (-0.5 + log((x-1)/(3-x)))^2)/int_fstar)
+p <- ggplot(x_plot)
+ p+ labs(y="density",title="Histogram and true pdf")+
+  geom_histogram(aes(x,y= ..density..),breaks=seq(0, 5, l=50), col="black", fill="orange", alpha=.3)+
+  geom_line(aes(x,fy,colour="fy"))+
+   scale_colour_manual(name="",values=cols, labels=mylabs)
+#geom_line(aes(y=sqrt(2/pi)*exp(-x^2/2)),colour="fy")+
+
+
+# qqplot
+
+require(pracma,ggplot2)
+
+# generate some x from the given density
+x=rhn(1000)$x
+x_plot = data.frame(x=x)
+
+# function which uses numerical integration to calculate F(p) - q
+mycdf = function(p,q){
+  f <- function(x) (1/((x-1)*(3-x))) * exp(-1/2 * (-0.5 + log((x-1)/(3-x)))^2)/int_fstar
+  integrate(f,1,p)$value-q
+}
+
+# solving F(x) - q = 0 to calculate the quantiles
+qfunc <- function(q){
+  # set lower as 0 and upper as 6 - will need to edit for correct cdf associated with your function
+  bisect(mycdf, 1.000001, 2.999999,q=q)$root
+}
+
+# makeing sure it works on a vector and returns a vector
+qhn1 <- function(p) unlist(lapply(p, qfunc))
+
+
+ggplot(x_plot, aes(sample=x))+
+  labs(title="Empirical against theoretical quantiles")+
+   stat_qq(distribution=qhn1) +
+   stat_qq_line(distribution=qhn1)
+
+
+```
+
+```{r}
+n=690
+x=rhn(n)
+x_rhn <- data.frame(x=x$x)
+ggAcf(x_rhn)+
+  labs(title="Autocovariance sequence of generated Data")
+gglagplot(phn(x_rhn$x), lags=4, do.lines=FALSE)+
+  labs(title=expression("Lag Plots of " ~ F[X](X)))
+
+```
+
+### Kolmogorov-Smirvov Test
+
+The Kolmogorov-Smirnov (K-S) test checks the difference between the empirical culumative distribution function (cdf), $F_{X_n}(x)$ and the theoretical cumulative distribution function, $F_X(x)$. Just to recap, our distribution function is as follows,
+\[
+F_X(x) = \int_1^x \frac{1}{c(x-1)(3-x)} e^{\frac{1}{2}(-\frac{1}{2}+log(\frac{x-1}{3-x}))} \textrm{d}x , \;\; 1<x<3,
+\]
+where $c$ is the normalising constant (we label this 'int_fstar').
+The K-S statistics is given by
+\[
+D  = \sup_x \left|F_{X_n}(x) - F_X(x)\right|.
+\]
+This test statistic is then compared to the critical values of the Kolmogorov distribution to determine the p-value of the test.
+  
+```{r}
+library(pracma)
+# simulation study of KS test, using data set length stored in n_vals and 
+#taking m simulations of each length.
+# Ties may be present (I guess from rounding)
+n_vals = c(100,300,600,900)
+nn_vals = length(n_vals)
+m=900
+
+ks.testrhn <- function(x){
+  kstestx = ks.test(x,phn)
+  # phn is the theoretical half norm cdf declared above
+  return(c(kstestx$p.value, kstestx$statistic))
+}
+ks.results=data.frame()
+
+for(n in 1:nn_vals){
+  n1=n_vals[n]
+  x <- matrix(0, nrow=n1, ncol=m)
+  # one call to rhn, then split into matrix in order to use the apply function
+  x1 = rhn(n1*m)$x
+  for(i in 1:m)  x[,i] <- x1[((i-1)*n1+1):(i*n1)]
+  ks.testx= apply(x,2,ks.testrhn)
+  ks.results = rbind(ks.results, data.frame(p.value=ks.testx[1,], D = ks.testx[2,], N=rep(n1,m)))
+}
+```
+
+
+```{r}
+ggplot(ks.results, aes(factor(N), D))+
+  geom_violin()+
+  geom_boxplot(width=0.05)+
+  labs(title="Distributions of the K-S test statistics")
+ggplot(ks.results, aes(factor(N), p.value))+
+  geom_violin()+
+  geom_boxplot(width=0.2)+
+  labs(title="Distributions of the K-S p-values")
+ggplot(ks.results, aes(p.value,colour=factor(N)))+
+  #geom_histogram(breaks=seq(0,1,by=0.05))+
+  geom_freqpoly(breaks=seq(0,1,0.1))+
+  labs(title="Frequency polygons of p-values")
+
+```
+```{r}
+library(knitr)
+ks.table <- ks.results %>% group_by(N) %>% summarise("Mean p-value" = round(mean(p.value),digits=3), "Std Dev (p)" = round(sqrt(var(p.value)), 3), "Mean D"=round(mean(D), digits=3), "Std Dev (D)"= round(sqrt(var(D)), 3))
+print(kable(ks.table))
+```
+The D test statistic is decreasing as sample size (n) increases, so the difference between the empirical and theoretical distribution function is decreasing. 
+The p-value is also fairly large, approximately 0.5. Hence there is no evidence that we can reject the null hypothesis which claims that the data comes from our specififed theoretical distribution. 
+The distribution of p-values is also roughly uniform which is expected under the null hypoethesis.
+The second test we will use is the Z test. Our z test statistic is $Z = \frac{\bar x - \mu_0}{\sigma n^{1/2}}$. Our null hypothesis is that the mean of our sample is the same as the expected value of our distribution function. 
+```{r}
+xbar = sum(x_rhn$x)/nrow(x_rhn) #sample mean
+sigma = sqrt(var(x_rhn$x)) #sample variance
+sqrt_n = sqrt(nrow(x_rhn)) #square root of n
+meanfunc <- function(x) (x*fstar(x))/int_fstar #function to integrate
+mu_0 = as.numeric(integrate(meanfunc,1.0000001,2.9999999)[1]) #numeric calc of mean
+
+z_score = (xbar - mu_0)/(sigma/sqrt_n)
+paste("P value is", 2*pnorm(-abs(z_score))) #convert z score to p value for two tailed test
+
+```
+This massive P Value means that it is unlikely to reject the null hypothesis. So there is no evidence to say that our randomly generated sample should have a mean different to that of the theoretical function we were given.
+
+
+###Estimating the normalising constant
+
+We are given a function proportional to a pdf. To find the normalising constant, we have to integrate our function over the bounds. The reciprocal of this integral is the normalising constant. The function we have been given can not be integrated analytically. So we will estimate it numerically. One method is a Crude Monte Carlo integration technique. For our example we will split our function $f$ into $f(x) = \frac{1}{3-1}\times(3-1)f(x)$ where $\frac{1}{3-1}$ is the pdf of the uniform(1,3) distribution. So we randomly generate from the uniform(1,3) distribution and then hit these values with our pdf and multiply by 2. Each value is a rectangular estimate of the integral. We take the average of these areas to estimate the integral.
+```{r}
+#fstar_vec <- Vectorize(fstar) #vectorising the fstar function so we can hit the random numbers with it next line
+#X_i = fstar_vec(x_rhn$x)
+#theta_hat = (3-1)*sum(X_i)/length(X_i) #rectangle width * rectangle heights/ no. of rek
+n=1000 #number of random gen points
+
+
+fstar_vec <- Vectorize(fstar) #vectorising the fstar function so we can hit the random numbers with it next line
+ptm <- proc.time()
+x_runi <- runif(n,1,3)
+X_i = fstar_vec(x_runi)
+theta_hat = (3-1)*sum(X_i)/length(X_i) #rectangle width * rectangle heights/ no. of rek
+nc_mc=1/theta_hat
+
+proc.time() - ptm
+var_crm = var(2*X_i)
+true_nc = 1/int_fstar
+error_cmc = (nc_mc-true_nc)/true_nc
+
+
+paste("Crude Monte Carlo estimate of normalising constant:",nc_mc)
+paste("This estimator is",(nc_mc-true_nc)/true_nc,"%", "away from the true value")
+#paste("variance of estimator:",var_crm,"/n")
+
+```
+This estimate is very accurate. Though, it should be possible to achieve and even more accurate result by using a cauchy distribution instead of a uniform distribution. This will likely take longer to run since the functions would be more expensive, but the cauchy curve we used earlier has a similar shape to this function, so the estimated value should be more accurate.
+
+
+Another technique to estimate the integral is Hit-or-miss Monte Carlo. Here we generate random numbers on uniform distributions with the bounds being the domain and range of the of the function. These random numbers are paired up into coordinates and then we count how many of these coordinates lie underneath the curve of our pdf.
+
+```{r}
+
+peak <- opt$objective #find peak value of pdf
+ptm2 <- proc.time()
+u_hm <- runif(n,1,3)
+v_hm <- runif(n,0,peak)
+
+hit_miss_check <- v_hm <= fstar_vec(u_hm)
+
+theta_hat_hm <- (3-1)*peak *(1/n)* sum(hit_miss_check)
+nc_hm = 1/theta_hat_hm
+proc.time() - ptm2
+
+var_hm <- (int_fstar)*(peak*2 - int_fstar)
+error_hm = (nc_hm-true_nc)/true_nc
+
+
+#paste("Hit-or-miss Monte Carlo estimate of normalising constant:",nc_hm)
+#paste("This estimator is",(nc_hm-true_nc)/true_nc,"%", "away from the true value")
+#paste("variance of estimator:",var_hm,"/n")
+
+
+yeet <- data.frame(Estimator= c("Crude","Hit-or-miss"), Estimate=c(nc_mc,nc_hm),Percentage_error=c(error_cmc,error_hm), Variance=c(var_crm,var_hm), Time=c(ptm[3],ptm2[3]))
+print(kable(yeet))
+
+```
+Looking at the two sets of results, we can see that the Crude Monte Carlo estimate is closer to the true value than the Hit-or-miss Monte Carlo estimate. Also the Hit-or-miss variance is a approximately a factor of two greater than the Crude Monte Carlo estimate. The time taken to calculate both are also very similar. From these tests, we conclude that Crude Monte Carlo is better technique than Hit-or-miss.
